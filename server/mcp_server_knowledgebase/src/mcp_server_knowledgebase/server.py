@@ -1,12 +1,27 @@
 import argparse
 import logging
 import os
-import requests
+from typing import Annotated, Any, Dict, Literal, Optional
 
-from typing import Dict, Optional, Final, Any
-from mcp.server import FastMCP
-from mcp_server_knowledgebase.config import config
+import aiohttp
+from mcp.server import MCPServer
+from mcp.server.caching import CacheHint
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
 from mcp_server_knowledgebase.common.auth import prepare_request
+from mcp_server_knowledgebase.config import config
+from mcp_server_knowledgebase.models import (
+    AddDocumentResult,
+    CollectionInfoResult,
+    CollectionSummary,
+    DocFilter,
+    DocumentInfo,
+    ListCollectionsResult,
+    SearchChunk,
+    SearchKnowledgeResult,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -24,18 +39,79 @@ doc_add_path = "/api/knowledge/doc/add"
 doc_info_path = "/api/knowledge/doc/info"
 
 # Create MCP server
-mcp = FastMCP("Knowledgebase MCP Server", port=int(os.getenv("PORT", "8000")),
-              streamable_http_path=os.getenv("STREAMABLE_HTTP_PATH", "/mcp"))
+mcp = MCPServer(
+    "Knowledgebase MCP Server",
+    version="0.2.0",
+    cache_hints={"tools/list": CacheHint(ttl_ms=300_000, scope="public")},
+)
 
-@mcp.tool()
-def add_doc(
-        collection_name:str,
-        add_type:str,
-        doc_id: str,
-        doc_name: str,
-        doc_type: str,
-        url: str,
-) -> Dict:
+
+def _transport_options(transport: str) -> Dict[str, Any]:
+    """Build transport-specific options accepted by MCP SDK v2."""
+    if transport == "stdio":
+        return {}
+    if transport != "streamable-http":
+        raise ValueError(f"Unsupported transport: {transport}")
+    return {
+        "host": os.getenv("MCP_SERVER_HOST", "127.0.0.1"),
+        "port": int(os.getenv("MCP_SERVER_PORT") or os.getenv("PORT", "8000")),
+        "streamable_http_path": os.getenv("STREAMABLE_HTTP_PATH", "/mcp"),
+        "stateless_http": True,
+        "json_response": True,
+    }
+
+
+async def _request_knowledgebase(path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Send one signed request without blocking the MCP event loop."""
+    signed = prepare_request(
+        method="POST",
+        path=path,
+        ak=config.ak,
+        sk=config.sk,
+        data=data,
+    )
+    timeout = aiohttp.ClientTimeout(total=float(os.getenv("KNOWLEDGE_BASE_TIMEOUT", "30")))
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.request(
+            method=signed.method,
+            url=f"https://{g_knowledge_base_domain}{signed.path}",
+            headers=signed.headers,
+            data=signed.body,
+        ) as response:
+            response.raise_for_status()
+            return await response.json()
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
+async def add_doc(
+    collection_name: Annotated[str, Field(min_length=1)],
+    add_type: Literal["url"],
+    doc_id: Annotated[
+        str,
+        Field(min_length=1, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9_]*$"),
+    ],
+    doc_name: Annotated[str, Field(min_length=1, max_length=256)],
+    doc_type: Literal[
+        "xlsx",
+        "csv",
+        "jsonl",
+        "txt",
+        "doc",
+        "docx",
+        "pdf",
+        "markdown",
+        "faq.xlsx",
+        "pptx",
+    ],
+    url: Annotated[str, Field(min_length=1)],
+) -> AddDocumentResult:
     """
     Add a document to a collection in your project.
     This tool allows you to add a document to a collection in your project by collection_name.
@@ -69,37 +145,29 @@ def add_doc(
             "url": url,
         }
 
-        doc_add_req = prepare_request(method="POST", path=doc_add_path, ak=config.ak, sk=config.sk, data=request_params)
-        rsp = requests.request(
-            method=doc_add_req.method,
-            url="https://{}{}".format(g_knowledge_base_domain, doc_add_req.path),
-            headers=doc_add_req.headers,
-            data=doc_add_req.body)
-
-        result = rsp.json()
+        result = await _request_knowledgebase(doc_add_path, request_params)
         if result['code'] != 0:
             logger.error(f"Error in add_doc: {result['message']}")
-            return {"error": result['message']}
+            raise ToolError(result['message'])
 
         doc_add_data = result['data']
         if not doc_add_data:
             raise ValueError(f"doc {doc_id} has no data.")
 
-        return {
-            "collection_name": collection_name,
-            "doc_id": doc_id,
-        }
+        return AddDocumentResult(collection_name=collection_name, doc_id=doc_id)
 
+    except ToolError:
+        raise
     except Exception as e:
         logger.error(f"Error in add_doc: {str(e)}")
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
-def get_doc(
-        collection_name: str,
-        doc_id: str,
-) -> Dict:
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_doc(
+    collection_name: str,
+    doc_id: str,
+) -> DocumentInfo:
     """
     Get information about a document from your collection.
     This tool allows you to get information about a document from your project by collection_name and doc_id.
@@ -136,33 +204,28 @@ def get_doc(
             "doc_id": doc_id,
         }
 
-        doc_info_req = prepare_request(method="POST", path=doc_info_path, ak=config.ak, sk=config.sk, data=request_params)
-        rsp = requests.request(
-            method=doc_info_req.method,
-            url="https://{}{}".format(g_knowledge_base_domain, doc_info_req.path),
-            headers=doc_info_req.headers,
-            data=doc_info_req.body)
-
-        result = rsp.json()
+        result = await _request_knowledgebase(doc_info_path, request_params)
         if result['code'] != 0:
-            logger.error(f"Error in add_doc: {result['message']}")
-            return {"error": result['message']}
+            logger.error(f"Error in get_doc: {result['message']}")
+            raise ToolError(result['message'])
 
         doc_info_data = result['data']
         if not doc_info_data:
             raise ValueError(f"doc {doc_id} not found.")
 
-        return doc_info_data
+        return DocumentInfo.model_validate(doc_info_data)
 
+    except ToolError:
+        raise
     except Exception as e:
         logger.error(f"Error in get_doc: {str(e)}")
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
-def get_collection(
-        collection_name: str,
-) -> Dict:
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def get_collection(
+    collection_name: str,
+) -> CollectionInfoResult:
     """
     Get information about a collection from your project.
     This tool allows you to get information about a collection from your project by collection_name.
@@ -191,36 +254,30 @@ def get_collection(
             "project": config.project,
         }
 
-        get_collection_req = prepare_request(method="POST", path=get_collections_path, ak=config.ak, sk=config.sk, data=request_params)
-        rsp = requests.request(
-            method=get_collection_req.method,
-            url="https://{}{}".format(g_knowledge_base_domain, get_collection_req.path),
-            headers=get_collection_req.headers,
-            data=get_collection_req.body)
-
-        result = rsp.json()
+        result = await _request_knowledgebase(get_collections_path, request_params)
         if result['code'] != 0:
             logger.error(f"Error in search_knowledge: {result['message']}")
-            return {"error": result['message']}
+            raise ToolError(result['message'])
 
         collection_info = result['data']
         if not collection_info:
             raise ValueError(f"Collection {collection_name} not found.")
 
-        return {
-            "collection_name": collection_info["collection_name"],
-            "description": collection_info["description"],
-            "status": collection_info["pipeline_list"][0]["index_list"][0]["status"]
-        }
+        return CollectionInfoResult(
+            collection_name=collection_info["collection_name"],
+            description=collection_info["description"],
+            status=collection_info["pipeline_list"][0]["index_list"][0]["status"],
+        )
 
+    except ToolError:
+        raise
     except Exception as e:
         logger.error(f"Error in get_collection: {str(e)}")
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
-def list_collections(
-) -> Dict:
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def list_collections() -> ListCollectionsResult:
     """
     List all collections of the globally configured project from the Viking Knowledgebase service.
     This tool allows you to list all collections in the Viking Knowledgebase service.
@@ -237,46 +294,39 @@ def list_collections(
             "project": config.project,
         }
 
-        list_collections_req = prepare_request(method="POST", path=list_collections_path, ak=config.ak, sk=config.sk, data=request_params)
-        rsp = requests.request(
-            method=list_collections_req.method,
-            url="https://{}{}".format(g_knowledge_base_domain, list_collections_req.path),
-            headers=list_collections_req.headers,
-            data=list_collections_req.body)
-
-        result = rsp.json()
+        result = await _request_knowledgebase(list_collections_path, request_params)
         if result['code'] != 0:
             logger.error(f"Error in list_collections: {result['message']}")
-            return {"error": result['message']}
+            raise ToolError(result['message'])
 
-        collections =result['data']['collection_list']
-        if not collections:
-            raise ValueError(f"No collections found in project {config.project}.")
+        collections = result['data']['collection_list']
 
         collection_list = []
 
         for collection in collections:
-            collection_list.append({
-                "collection_name": collection["collection_name"],
-                "description": collection["description"],
-            })
+            collection_list.append(
+                CollectionSummary(
+                    collection_name=collection["collection_name"],
+                    description=collection["description"],
+                )
+            )
 
-        return {
-            "collection_list": collection_list,
-        }
+        return ListCollectionsResult(collection_list=collection_list)
 
+    except ToolError:
+        raise
     except Exception as e:
         logger.error(f"Error in list_collections: {str(e)}")
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
-def search_knowledge(
-        query: str,
-        collection_name: str,
-        limit: int = 3,
-        doc_filter: dict = None,
-) -> Dict:
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def search_knowledge(
+    query: str,
+    collection_name: str,
+    limit: Annotated[int, Field(ge=1, le=100)] = 3,
+    doc_filter: Optional[DocFilter] = None,
+) -> SearchKnowledgeResult:
     """Search knowledge from the Viking Knowledgebase service And return Top limit related chunks of your query.
     This tool allows you to search knowledge in provided collection based on the given query.
 
@@ -312,42 +362,27 @@ def search_knowledge(
 
         if doc_filter:
             request_params['query_param'] = {
-                "doc_filter": doc_filter,
+                "doc_filter": doc_filter.model_dump(mode="json"),
             }
 
-        search_req = prepare_request(method="POST", path=search_knowledge_path, ak=config.ak, sk=config.sk, data=request_params)
-        logger.debug("search param: {}".format(search_req.body))
-        rsp = requests.request(
-            method=search_req.method,
-            url="https://{}{}".format(g_knowledge_base_domain, search_req.path),
-            headers=search_req.headers,
-            data=search_req.body)
-
-        result = rsp.json()
+        result = await _request_knowledgebase(search_knowledge_path, request_params)
         if result['code'] != 0:
             logger.error(f"Error in search_knowledge: {result['message']}")
-            return {"error": result['message']}
+            raise ToolError(result['message'])
 
-        if not result['data']['result_list']:
-            raise ValueError(f"No results found for collection {collection_name}")
-
-
-        chunks = result['data']['result_list']
+        chunks = result['data'].get('result_list', [])
 
         search_result = []
 
         for chunk in chunks:
-            search_result.append({
-                "id": chunk["id"],
-                "content": chunk["content"],
-            })
+            search_result.append(SearchChunk(id=chunk["id"], content=chunk["content"]))
 
-        return {
-            "result_list": search_result,
-        }
+        return SearchKnowledgeResult(result_list=search_result)
+    except ToolError:
+        raise
     except Exception as e:
         logger.error(f"Error in search_knowledge: {str(e)}")
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
 def main():
@@ -356,21 +391,19 @@ def main():
     parser.add_argument(
         "--transport",
         "-t",
-        choices=["sse", "stdio"],
+        choices=["stdio", "streamable-http"],
         default="stdio",
-        help="Transport protocol to use (sse or stdio)",
+        help="Transport protocol to use (stdio or streamable-http)",
     )
     args = parser.parse_args()
     logger.info(f"Starting Knowledgebase MCP Server with {args.transport} transport")
 
     try:
-        # Run the MCP server
-        logger.info( f"Starting Viking Knowledge Base MCP Server with {args.transport} transport")
-
-        mcp.run(transport=args.transport)
+        mcp.run(transport=args.transport, **_transport_options(args.transport))
     except Exception as e:
         logger.error(f"Error starting Knowledgebase MCP Server: {str(e)}")
         raise
+
 
 if __name__ == "__main__":
     main()

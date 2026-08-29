@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KnowledgeBaseConfig:
     """Configuration for Viking Knowledge Base MCP Server."""
+
     ak: str
     sk: str
     project: Optional[str] = None
@@ -20,8 +21,6 @@ def load_config() -> KnowledgeBaseConfig:
     required_vars = [
         "VOLCENGINE_ACCESS_KEY",
         "VOLCENGINE_SECRET_KEY",
-        "KNOWLEDGE_BASE_PROJECT",
-        "KNOWLEDGE_BASE_REGION",
     ]
 
     # Check if all required environment variables are set
@@ -35,8 +34,8 @@ def load_config() -> KnowledgeBaseConfig:
     return KnowledgeBaseConfig(
         ak=os.environ["VOLCENGINE_ACCESS_KEY"],
         sk=os.environ["VOLCENGINE_SECRET_KEY"],
-        project=os.environ.get("KNOWLEDGE_BASE_PROJECT","default"),
-        region=os.environ.get("KNOWLEDGE_BASE_REGION", "cn-north-1")
+        project=os.environ.get("KNOWLEDGE_BASE_PROJECT", "default"),
+        region=os.environ.get("KNOWLEDGE_BASE_REGION", "cn-north-1"),
     )
 
 
