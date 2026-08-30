@@ -12,7 +12,7 @@ allowing you to add doc to your collections and get doc processing info by doc_i
 ### Prerequisites
 
 - Python 3.10 or higher
-- API credentials (AK/SK)
+- A Viking Knowledge Base API key or VolcEngine AK/SK credentials
 
 ### Installation
 
@@ -30,10 +30,15 @@ uv pip install -e .
 
 ### Configuration
 
-The server requires the following environment variables:
+The server requires exactly one authentication method:
 
-- `VOLCENGINE_ACCESS_KEY`: Your VolcEngine access key
-- `VOLCENGINE_SECRET_KEY`: Your VolcEngine secret key
+- API key: set `VIKING_API_KEY` only. Requests use
+  `Authorization: Bearer <VIKING_API_KEY>`.
+- AK/SK: set both `VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`.
+  Requests use VolcEngine SignerV4 authentication.
+
+The server rejects configurations that provide both methods, neither method,
+or only one member of the AK/SK pair.
 
 Optional environment variables:
 - `KNOWLEDGE_BASE_PROJECT`: Viking Knowledge Base project name (default: `default`)
@@ -71,9 +76,10 @@ the same process also supports older handshake-based clients automatically.
 Legacy HTTP+SSE is intentionally not exposed because it is deprecated by the
 `2026-07-28` specification.
 
-The HTTP endpoint does not turn the configured VolcEngine AK/SK into client
-authentication. Protect remote deployments with an authentication gateway or
-MCP-compatible OAuth, and never expose the service credentials to callers.
+The HTTP endpoint does not turn the configured API key or VolcEngine AK/SK into
+client authentication. Protect remote deployments with an authentication
+gateway or MCP-compatible OAuth, and never expose the service credentials to
+callers.
 
 ### Available Tools
 
@@ -173,10 +179,9 @@ To add this server to your MCP configuration, add the following to your MCP sett
           "--from",
           "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
           "mcp-server-knowledgebase"
-        ],
+      ],
       "env": {
-        "VOLCENGINE_ACCESS_KEY": "your-access-key",
-        "VOLCENGINE_SECRET_KEY": "your-secret-key", 
+        "VIKING_API_KEY": "your-viking-api-key",
         "KNOWLEDGE_BASE_PROJECT": "your-project-name",
         "KNOWLEDGE_BASE_REGION": "your-region"
       }
@@ -185,12 +190,16 @@ To add this server to your MCP configuration, add the following to your MCP sett
 }
 ```
 
+Alternatively, replace `VIKING_API_KEY` with both
+`VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`.
+
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Authentication Errors**
-   - Verify your AK/SK credentials are correct
+   - Verify your API key or AK/SK credentials are correct
+   - Ensure exactly one authentication method is configured
    - Check that you have the necessary permissions for the collection
 
 2. **Connection Timeouts**

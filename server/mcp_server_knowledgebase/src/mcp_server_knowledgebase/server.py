@@ -63,20 +63,21 @@ def _transport_options(transport: str) -> Dict[str, Any]:
 
 async def _request_knowledgebase(path: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """Send one signed request without blocking the MCP event loop."""
-    signed = prepare_request(
+    request = prepare_request(
         method="POST",
         path=path,
         ak=config.ak,
         sk=config.sk,
+        api_key=config.api_key,
         data=data,
     )
     timeout = aiohttp.ClientTimeout(total=float(os.getenv("KNOWLEDGE_BASE_TIMEOUT", "30")))
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.request(
-            method=signed.method,
-            url=f"https://{g_knowledge_base_domain}{signed.path}",
-            headers=signed.headers,
-            data=signed.body,
+            method=request.method,
+            url=f"https://{g_knowledge_base_domain}{request.path}",
+            headers=request.headers,
+            data=request.body,
         ) as response:
             response.raise_for_status()
             return await response.json()

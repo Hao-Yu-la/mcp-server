@@ -20,7 +20,7 @@ Viking Knowledge Base MCP Server 是一个模型上下文协议(Model Context Pr
 ### 前置准备
 - Python 3.10+
 - UV
-- API credentials (AK/SK)
+- 知识库 API Key 或火山引擎 AK/SK
 
 ### 安装
 克隆仓库:
@@ -47,7 +47,7 @@ Server 使用 MCP Python SDK 2.x，支持 `2026-07-28` 协议修订版及
 `server/discover` 无状态协商，同时由 SDK 自动兼容旧版握手客户端。
 旧 HTTP+SSE 已被新协议弃用，因此本 Server 不再提供 SSE 启动模式。
 
-Streamable HTTP 本身不会把火山引擎 AK/SK 转换成 MCP 调用方认证。
+Streamable HTTP 本身不会把知识库 API Key 或火山引擎 AK/SK 转换成 MCP 调用方认证。
 远程部署必须放在认证网关之后或接入兼容 MCP 的 OAuth，且不得向调用方暴露服务凭证。
 
 使用客户端与服务器交互:
@@ -59,10 +59,17 @@ Trae | Cursor ｜ Claude Desktop | Cline | ...
 
 ### 环境变量
 
+鉴权配置必须二选一：仅配置 `VIKING_API_KEY`，或同时配置
+`VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`。API Key 模式会通过
+`Authorization: Bearer <VIKING_API_KEY>` 请求头鉴权；AK/SK 模式继续使用
+SignerV4。两种方式同时配置、均未配置，或只配置 AK/SK 中的一项时，服务将
+启动失败。
+
 以下环境变量可用于配置MCP服务器:
 
 | 环境变量                     | 描述              | 默认值 |
 |--------------------------|-----------------|-------|
+| `VIKING_API_KEY`          | 知识库 API Key（二选一） | - |
 | `VOLCENGINE_ACCESS_KEY`  | 火山引擎账号ACCESSKEY | - |
 | `VOLCENGINE_SECRET_KEY`  | 火山引擎账号SECRETKEY | - |
 | `KNOWLEDGE_BASE_PROJECT` | 知识库所属项目         | `default` |
@@ -161,10 +168,9 @@ Parameters:
           "--from",
           "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
           "mcp-server-knowledgebase"
-        ],
+      ],
       "env": {
-        "VOLCENGINE_ACCESS_KEY": "your-access-key",
-        "VOLCENGINE_SECRET_KEY": "your-secret-key", 
+        "VIKING_API_KEY": "your-viking-api-key",
         "KNOWLEDGE_BASE_PROJECT": "your-project-name",
         "KNOWLEDGE_BASE_REGION": "your-region"
       }
@@ -172,6 +178,9 @@ Parameters:
   }
 }
 ```
+
+也可以删除 `VIKING_API_KEY`，改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
+`VOLCENGINE_SECRET_KEY`。
 
 ## 证书
 volcengine/mcp-server is licensed under the [MIT License](https://github.com/volcengine/mcp-server/blob/main/LICENSE).
