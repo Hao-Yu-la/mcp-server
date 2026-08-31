@@ -3,121 +3,140 @@ from __future__ import annotations
 from typing import Any
 
 
-def async_task_response(result: dict[str, Any]) -> dict[str, Any]:
-    """异步处理任务 — 从 API 响应中提取 task_id / request_id 返回。
+QUERY_RESERVED_FIELDS = frozenset(
+    {"task_id", "task_type", "request_id", "status", "success", "error", "result"}
+)
+QUERY_IGNORED_RESULT_FIELDS = frozenset({"usage"})
 
-    业务级失败（HTTP 2xx 但 success=false）会被识别并转为 error 字段输出。
 
-    Returns:
-        正向: { "task_id": "xxx", "request_id": "xxx" }
-        失败: { "task_id": "xxx", "request_id": "xxx", "error": "<message>" }
-    """
-    if not isinstance(result, dict):
-        return {"task_id": None}
+def _non_empty_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "<nil>":
+        return None
+    return text
 
-    if result.get("success") is False:
-        return error_response(
-            result.get("error"),
-            task_id=result.get("task_id"),
-            request_id=result.get("request_id"),
-        )
 
-    output: dict[str, Any] = {"task_id": result.get("task_id")}
-    request_id = result.get("request_id")
-    if request_id is not None:
+def _is_failure_envelope(payload: dict[str, Any]) -> bool:
+    if not payload or "error" not in payload:
+        return False
+    success = payload.get("success")
+    return isinstance(success, bool) and not success
+
+
+def _is_business_failure(payload: dict[str, Any]) -> bool:
+    success = payload.get("success")
+    return isinstance(success, bool) and not success
+
+
+def _is_terminal_failure(payload: dict[str, Any]) -> bool:
+    status = (_non_empty_string(payload.get("status")) or "").lower()
+    return status in {"failed", "canceled", "cancelled"}
+
+
+def _is_completed_task_status(payload: dict[str, Any]) -> bool:
+    status = (_non_empty_string(payload.get("status")) or "").lower()
+    return status == "completed"
+
+
+def _business_failure_response(payload: dict[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {"success": False}
+    error_field = payload.get("error")
+    output["error"] = error_field if error_field is not None else "unknown error"
+    if task_id := _non_empty_string(payload.get("task_id")):
+        output["task_id"] = task_id
+    if task_type := _non_empty_string(payload.get("task_type")):
+        output["task_type"] = task_type
+    if request_id := _non_empty_string(payload.get("request_id")):
         output["request_id"] = request_id
+    if status := _non_empty_string(payload.get("status")):
+        output["status"] = status
     return output
 
 
-def query_task_response(result: dict[str, Any]) -> dict[str, Any]:
-    """查询任务结果 — 外层保留 task_id/request_id/status，将 result 中的字段解构平铺到外层。
+def error_response(error: object = None, **metadata: Any) -> dict[str, Any]:
+    if isinstance(error, dict) and _is_failure_envelope(error):
+        output = _business_failure_response(error)
+        output.update({key: value for key, value in metadata.items() if value is not None})
+        return output
 
-    业务级失败（HTTP 2xx 但 success=false，如 task_id 不存在）会被识别并转为 error 字段输出。
+    output: dict[str, Any] = {"success": False, "error": error or "unknown error"}
+    output.update({key: value for key, value in metadata.items() if value is not None})
+    return output
 
-    API 返回结构: { task_id, request_id, success, task_type, status, result: { duration, resolution, video_url } }
-    正向输出: { task_id, request_id, status, duration, resolution, video_url }
-    失败输出: { task_id, request_id, error: "<message>" }
-    """
+
+def async_task_response(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(result, dict):
-        return {}
-
-    if result.get("success") is False:
-        return error_response(
-            result.get("error"),
-            task_id=result.get("task_id"),
-            request_id=result.get("request_id"),
-        )
-
+        return error_response(None)
+    if _is_business_failure(result):
+        return _business_failure_response(result)
     task_id = result.get("task_id")
-    request_id = result.get("request_id")
-    status = result.get("status")
-    task_result = result.get("result") or {}
-
-    output: dict[str, Any] = {"task_id": task_id}
-    if request_id is not None:
-        output["request_id"] = request_id
-    if status is not None:
-        output["status"] = status
-    if isinstance(task_result, dict):
-        output.update(task_result)
+    if not isinstance(task_id, str) or not task_id:
+        return error_response({"message": "missing non-empty task_id"})
+    output = {key: result[key] for key in ("task_id", "task_type", "request_id") if result.get(key) not in (None, "")}
+    if isinstance(result.get("success"), bool):
+        output["success"] = result["success"]
     return output
 
 
 def sync_result_response(result: dict[str, Any]) -> dict[str, Any]:
-    """同步处理任务 — API 网关返回 {success, task_id, request_id, result: {...}}。
-
-    与 query_task_response 处理方式一致：保留 task_id/request_id/status，将 result 中的字段解构平铺到外层。
-
-    业务级失败（HTTP 2xx 但 success=false）会被识别并转为 error 字段输出。
-
-    Returns:
-        正向: { task_id, request_id, status?, ...业务字段 }
-        失败: { task_id, request_id, error: "<message>" }
-    """
     if not isinstance(result, dict):
-        return {}
-
-    if result.get("success") is False:
-        return error_response(
-            result.get("error"),
-            task_id=result.get("task_id"),
-            request_id=result.get("request_id"),
-        )
-
-    output: dict[str, Any] = {}
-    task_id = result.get("task_id")
-    request_id = result.get("request_id")
-    status = result.get("status")
-    if task_id is not None:
-        output["task_id"] = task_id
-    if request_id is not None:
-        output["request_id"] = request_id
-    if status is not None:
-        output["status"] = status
-    inner = result.get("result")
-    if isinstance(inner, dict):
-        output.update(inner)
+        return error_response(None)
+    if _is_business_failure(result):
+        return _business_failure_response(result)
+    output = dict(result.get("result") or {})
+    if result.get("request_id") is not None:
+        output["request_id"] = result["request_id"]
+    if result.get("usage") is not None:
+        output["usage"] = result["usage"]
     return output
 
 
-def error_response(
-    error: dict[str, Any] | str | None = None,
-    *,
-    task_id: str | None = None,
-    request_id: str | None = None,
-) -> dict[str, Any]:
-    """报错响应结构。
+def query_task_response(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return error_response(None)
+    if not result:
+        return {}
 
-    直接透传原始 error 内容，不做字段提取。
+    output: dict[str, Any] = {
+        "task_id": _non_empty_string(result.get("task_id")) or "",
+    }
+    if task_type := _non_empty_string(result.get("task_type")):
+        output["task_type"] = task_type
+    if request_id := _non_empty_string(result.get("request_id")):
+        output["request_id"] = request_id
+    if status := _non_empty_string(result.get("status")):
+        output["status"] = status
 
-    Returns:
-        { "task_id": "xxx", "request_id": "xxx", "error": <原始error> }
-    """
-    if not error:
-        error = "unknown error"
-    result: dict[str, Any] = {"error": error}
-    if task_id is not None:
-        result["task_id"] = task_id
-    if request_id is not None:
-        result["request_id"] = request_id
-    return result
+    task_result = result.get("result")
+    if isinstance(task_result, dict):
+        conflicts = sorted(QUERY_RESERVED_FIELDS & set(task_result))
+        if conflicts:
+            return error_response(
+                {"message": f"query result contains reserved fields: {conflicts}"},
+                task_id=output.get("task_id"),
+                task_type=output.get("task_type"),
+                request_id=output.get("request_id"),
+                status=output.get("status"),
+            )
+        for key, value in task_result.items():
+            if key in QUERY_IGNORED_RESULT_FIELDS:
+                continue
+            output[key] = value
+
+    if _is_business_failure(result) or _is_terminal_failure(result):
+        output["success"] = False
+        error_field = result.get("error")
+        output["error"] = error_field if error_field is not None else "unknown error"
+
+    output.pop("usage", None)
+    if (
+        _is_completed_task_status(result)
+        and not _is_business_failure(result)
+        and not _is_terminal_failure(result)
+        and result.get("usage") is not None
+    ):
+        output["usage"] = result["usage"]
+
+    return output
