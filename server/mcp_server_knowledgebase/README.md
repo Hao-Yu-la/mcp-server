@@ -12,7 +12,7 @@ allowing you to add doc to your collections and get doc processing info by doc_i
 ### Prerequisites
 
 - Python 3.10 or higher
-- API credentials (AK/SK)
+- A Viking Knowledge Base API key or VolcEngine AK/SK credentials
 
 ### Installation
 
@@ -30,21 +30,31 @@ uv pip install -e .
 
 ### Configuration
 
-The server requires the following environment variables:
+The server requires at least one authentication method:
 
-- `VOLCENGINE_ACCESS_KEY`: Your VolcEngine access key
-- `VOLCENGINE_SECRET_KEY`: Your VolcEngine secret key
+- API key: set `VIKING_API_KEY`. Requests use
+  `Authorization: Bearer <VIKING_API_KEY>`.
+- AK/SK: set both `VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`.
+  Requests use VolcEngine SignerV4 authentication.
+
+When both methods are configured, `VIKING_API_KEY` takes precedence and AK/SK
+is ignored. When no API key is configured, AK and SK must be provided together.
+The server rejects configurations with no usable authentication method.
 
 Optional environment variables:
-- `KNOWLEDGE_BASE_PROJECT`: Your viking knowledge base project name
-- `KNOWLEDGE_BASE_REGION`: Your viking knowledge base region,if not provided, will use `cn-north-1` as default
-- `PORT`: Port for the FastMCP server (default: 8000)
+- `KNOWLEDGE_BASE_PROJECT`: Viking Knowledge Base project name (default: `default`)
+- `KNOWLEDGE_BASE_REGION`: Viking Knowledge Base region (default: `cn-north-1`)
+- `MCP_SERVER_HOST`: Streamable HTTP bind host (default: `127.0.0.1`)
+- `MCP_SERVER_PORT`: Streamable HTTP port; falls back to `PORT` (default: `8000`)
+- `STREAMABLE_HTTP_PATH`: Streamable HTTP endpoint path (default: `/mcp`)
+- `KNOWLEDGE_BASE_TIMEOUT`: Upstream request timeout in seconds (default: `30`)
 
 ## Usage
 
 ### Running the Server
 
-The server can be run with either stdio transport (for MCP integration) or SSE transport:
+The server supports stdio for local integrations and stateless Streamable HTTP
+for remote deployments:
 
 ```bash
 python -m mcp_server_knowledgebase.server --transport stdio
@@ -53,8 +63,24 @@ python -m mcp_server_knowledgebase.server --transport stdio
 Or:
 
 ```bash
-python -m mcp_server_knowledgebase.server --transport sse
+python -m mcp_server_knowledgebase.server --transport streamable-http
 ```
+
+The Streamable HTTP endpoint is `http://127.0.0.1:8000/mcp` by default.
+Set `MCP_SERVER_HOST=0.0.0.0` when running behind a trusted gateway.
+
+### MCP protocol compatibility
+
+This server uses MCP Python SDK 2.x and speaks protocol revision `2026-07-28`.
+Modern clients use the stateless per-request protocol and `server/discover`;
+the same process also supports older handshake-based clients automatically.
+Legacy HTTP+SSE is intentionally not exposed because it is deprecated by the
+`2026-07-28` specification.
+
+The HTTP endpoint does not turn the configured API key or VolcEngine AK/SK into
+client authentication. Protect remote deployments with an authentication
+gateway or MCP-compatible OAuth, and never expose the service credentials to
+callers.
 
 ### Available Tools
 
@@ -66,7 +92,7 @@ Add a document to a collection in your project.
 add_doc(
     collection_name="collection_name",
     add_type="url",
-    doc_id="_mcp_server_auto_gen_doc_id_xxxxxxx",
+    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
     doc_name="doc_xxxx",
     doc_type="pdf",
     url="http://xxxxx.pdf"
@@ -76,8 +102,8 @@ add_doc(
 Parameters:
 - `collection_name` (required): the name of the collection you want to add document .
 - `add_type` (required): the type of the document to add. so far only support "url" now. 
-- `doc_id` (required): you should generate a unique doc_id based on user's given url and timestamp, the doc_id can only use English letters, numbers, and underscores , and must start with an English letter. It cannot be empty. Length requirement: [1, 128], you can use a format like "_mcp_server_auto_gen_doc_id_xxxxxxx.
-- `doc_name` (required): the name of the document to add. you can1 generate a unique doc_name based on user given url and timestamp. the length of doc_name must between 1 and 256. you can use a format like "_mcp_server_auto_gen_doc_name_xxxxxxx.
+- `doc_id` (required): you should generate a unique doc_id based on user's given url and timestamp, the doc_id can only use English letters, numbers, and underscores , and must start with an English letter. It cannot be empty. Length requirement: [1, 128], you can use a format like "mcp_server_auto_gen_doc_id_xxxxxxx".
+- `doc_name` (required): the name of the document to add. You can generate a unique doc_name based on the user-provided URL and timestamp. The length of doc_name must be between 1 and 256; for example, "mcp_server_auto_gen_doc_name_xxxxxxx".
 - `doc_type` (required): the type of the document to add. for structured document, we support xlsx, csv,jsonl, for unstructured document, wu support txt, doc, docx, pdf, markdown, faq.xlsx, pptx". you should judge the doc_type based on user's given url and judge if we support this doc type. if supported, assign this parameter.
 - `url` (required): the url of the document to add. user should give a valid url, we will add the doc to the collection.
 
@@ -88,7 +114,7 @@ Get information about document by collection_name and doc_id .
 ```python
 get_doc(
     collection_name="collection_name",
-    doc_id="_mcp_server_auto_gen_doc_id_xxxxxxx",
+    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
 )
 ```
 
@@ -128,19 +154,24 @@ Search for knowledge in the configured collection based on a query.
 search_knowledge(
     query="How to reset my password?",
     limit=3,
-    collection_name=None,
+    collection_name="collection_name",
     doc_filter=None,
 )
 ```
 
 Parameters:
 - `query` (required): The search query string
-- `limit` (optional): Maximum number of results to return (default: 3)
-- `collection_name` (optional): Knowledge base collection name to search. If not provided, llm will choose some collections to search based on the description of collection
+- `limit` (optional): Maximum number of results to return, from 1 to 100 (default: 3)
+- `collection_name` (required): Knowledge Base collection name to search
 - `doc_filter` (optional): the filter is used to filter search results(default: None), which is structured as a JSON object with the following key components:
   - `op` (string, required): specifies the query operator that defines the filtering logic. Valid values are 'must' and 'must_not', 'must' means results must satisfy the condition (inclusion filter),'must_not' means results must not satisfy the condition (exclusion filter).
   - `field` (string, required): indicates the specific document field to apply the filter on (e.g., "doc_id").
   - `conds` (array, required):  contains the concrete values used for filtering. The data type of elements in the array depends on the field.
+
+Each result contains the chunk `id` and `content`, plus the source document's
+`doc_id` and `doc_name`. The metadata fields are `null` when Viking does not
+provide them. A non-null `doc_id` can be passed directly to `get_doc`.
+
 ## MCP Integration
 
 To add this server to your MCP configuration, add the following to your MCP settings file:
@@ -152,12 +183,11 @@ To add this server to your MCP configuration, add the following to your MCP sett
       "command": "uvx",
         "args": [
           "--from",
-          "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
+          "mcp-server-knowledgebase>=0.2.0",
           "mcp-server-knowledgebase"
-        ],
+      ],
       "env": {
-        "VOLCENGINE_ACCESS_KEY": "your-access-key",
-        "VOLCENGINE_SECRET_KEY": "your-secret-key", 
+        "VIKING_API_KEY": "your-viking-api-key",
         "KNOWLEDGE_BASE_PROJECT": "your-project-name",
         "KNOWLEDGE_BASE_REGION": "your-region"
       }
@@ -166,12 +196,17 @@ To add this server to your MCP configuration, add the following to your MCP sett
 }
 ```
 
+You may alternatively or additionally configure both
+`VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`. If all three variables are
+set, `VIKING_API_KEY` takes precedence.
+
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Authentication Errors**
-   - Verify your AK/SK credentials are correct
+   - Verify your API key or AK/SK credentials are correct
+   - Ensure at least one authentication method is configured
    - Check that you have the necessary permissions for the collection
 
 2. **Connection Timeouts**

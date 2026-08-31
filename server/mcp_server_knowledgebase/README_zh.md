@@ -20,7 +20,7 @@ Viking Knowledge Base MCP Server 是一个模型上下文协议(Model Context Pr
 ### 前置准备
 - Python 3.10+
 - UV
-- API credentials (AK/SK)
+- 知识库 API Key 或火山引擎 AK/SK
 
 ### 安装
 克隆仓库:
@@ -36,9 +36,19 @@ git clone git@github.com:volcengine/mcp-server.git
 cd mcp-server/server/mcp_server_knowledgebase
 uv run mcp-server-knowledgebase
 
-# 使用sse模式启动(默认为stdio)
-uv run mcp-server-knowledgebase -t sse
+# 使用无状态 Streamable HTTP 模式启动（默认为 stdio）
+uv run mcp-server-knowledgebase -t streamable-http
 ```
+
+Streamable HTTP 默认地址为 `http://127.0.0.1:8000/mcp`。在可信网关后部署时，
+可设置 `MCP_SERVER_HOST=0.0.0.0`。
+
+Server 使用 MCP Python SDK 2.x，支持 `2026-07-28` 协议修订版及
+`server/discover` 无状态协商，同时由 SDK 自动兼容旧版握手客户端。
+旧 HTTP+SSE 已被新协议弃用，因此本 Server 不再提供 SSE 启动模式。
+
+Streamable HTTP 本身不会把知识库 API Key 或火山引擎 AK/SK 转换成 MCP 调用方认证。
+远程部署必须放在认证网关之后或接入兼容 MCP 的 OAuth，且不得向调用方暴露服务凭证。
 
 使用客户端与服务器交互:
 ```
@@ -49,15 +59,26 @@ Trae | Cursor ｜ Claude Desktop | Cline | ...
 
 ### 环境变量
 
+鉴权至少需要配置一种方式：配置 `VIKING_API_KEY`，或同时配置
+`VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`。API Key 模式会通过
+`Authorization: Bearer <VIKING_API_KEY>` 请求头鉴权；AK/SK 模式继续使用
+SignerV4。两种方式可以同时配置，此时 `VIKING_API_KEY` 优先，AK/SK 会被
+忽略。未配置 API Key 时，AK 和 SK 必须同时提供；没有可用鉴权方式时服务将
+启动失败。
+
 以下环境变量可用于配置MCP服务器:
 
 | 环境变量                     | 描述              | 默认值 |
 |--------------------------|-----------------|-------|
+| `VIKING_API_KEY`          | 知识库 API Key（配置时优先使用） | - |
 | `VOLCENGINE_ACCESS_KEY`  | 火山引擎账号ACCESSKEY | - |
 | `VOLCENGINE_SECRET_KEY`  | 火山引擎账号SECRETKEY | - |
-| `KNOWLEDGE_BASE_PROJECT` | 知识库所属项目         | - |
+| `KNOWLEDGE_BASE_PROJECT` | 知识库所属项目         | `default` |
 | `KNOWLEDGE_BASE_REGION`  | 知识库区域           | cn-north-1 |
-| `PORT`                   | MCP server监听端口  | `8000` |
+| `MCP_SERVER_HOST`        | Streamable HTTP 监听地址 | `127.0.0.1` |
+| `MCP_SERVER_PORT`        | Streamable HTTP 端口（兼容 `PORT`） | `8000` |
+| `STREAMABLE_HTTP_PATH`   | Streamable HTTP 路径 | `/mcp` |
+| `KNOWLEDGE_BASE_TIMEOUT` | 上游请求超时（秒） | `30` |
 
 
 ## 可用工具
@@ -76,7 +97,7 @@ Knowledge Base MCP Server 提供以下功能
 add_doc(
     collection_name="collection_name",
     add_type="url",
-    doc_id="_mcp_server_auto_gen_doc_id_xxxxxxx",
+    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
     doc_name="doc_xxxx",
     doc_type="pdf",
     url="http://xxxxx.pdf"
@@ -96,7 +117,7 @@ Parameters:
 ```python
 get_doc(
     collection_name="collection_name",
-    doc_id="_mcp_server_auto_gen_doc_id_xxxxxxx",
+    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
 )
 ```
 
@@ -128,14 +149,18 @@ list_collections()
 search_knowledge(
     query="How to reset my password?",
     limit=3,
-    collection_name=None
+    collection_name="collection_name"
 )
 ```
 
 Parameters:
 - `query` (必须): 搜索查询字符串
-- `limit` (可选): 返回的最大结果数（默认值：3）
-- `collection_name` (可选): 要搜索的知识库名称。如果未提供，LLM将根据您账号列表下的知识库描述选择自动选择要搜索的知识库
+- `limit` (可选): 返回的最大结果数，范围 1–100（默认值：3）
+- `collection_name` (必须): 要搜索的知识库名称
+
+每条结果包含分块的 `id`、`content`，以及来源文档的 `doc_id` 和
+`doc_name`；Viking 未提供文档元数据时，这两个字段为 `null`。非空的
+`doc_id` 可以直接传给 `get_doc`。
 
 
 ### uvx 启动
@@ -146,12 +171,11 @@ Parameters:
       "command": "uvx",
         "args": [
           "--from",
-          "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
+          "mcp-server-knowledgebase>=0.2.0",
           "mcp-server-knowledgebase"
-        ],
+      ],
       "env": {
-        "VOLCENGINE_ACCESS_KEY": "your-access-key",
-        "VOLCENGINE_SECRET_KEY": "your-secret-key", 
+        "VIKING_API_KEY": "your-viking-api-key",
         "KNOWLEDGE_BASE_PROJECT": "your-project-name",
         "KNOWLEDGE_BASE_REGION": "your-region"
       }
@@ -159,6 +183,9 @@ Parameters:
   }
 }
 ```
+
+也可以额外或改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
+`VOLCENGINE_SECRET_KEY`。三个变量均配置时，优先使用 `VIKING_API_KEY`。
 
 ## 证书
 volcengine/mcp-server is licensed under the [MIT License](https://github.com/volcengine/mcp-server/blob/main/LICENSE).
