@@ -157,6 +157,10 @@ Parameters:
 - `limit` (可选): 返回的最大结果数，范围 1–100（默认值：3）
 - `collection_name` (必须): 要搜索的知识库名称
 
+每条结果包含分块的 `id`、`content`，以及来源文档的 `doc_id` 和
+`doc_name`；Viking 未提供文档元数据时，这两个字段为 `null`。非空的
+`doc_id` 可以直接传给 `get_doc`。
+
 
 ### uvx 启动
 ```json

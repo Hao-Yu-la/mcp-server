@@ -58,6 +58,8 @@ class ListCollectionsResult(BaseModel):
 class SearchChunk(BaseModel):
     id: str
     content: str
+    doc_id: Optional[str] = None
+    doc_name: Optional[str] = None
 
 
 class SearchKnowledgeResult(BaseModel):

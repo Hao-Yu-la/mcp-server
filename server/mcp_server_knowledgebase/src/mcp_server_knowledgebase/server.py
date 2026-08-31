@@ -348,6 +348,8 @@ async def search_knowledge(
         A list of search results.
         id: the id of the knowledge base chunk.
         content: the content of the knowledge base chunk.
+        doc_id: the id of the document containing the chunk, when available.
+        doc_name: the name of the document containing the chunk, when available.
     """
 
     try:
@@ -376,7 +378,16 @@ async def search_knowledge(
         search_result = []
 
         for chunk in chunks:
-            search_result.append(SearchChunk(id=chunk["id"], content=chunk["content"]))
+            raw_doc_info = chunk.get("doc_info")
+            doc_info = raw_doc_info if isinstance(raw_doc_info, dict) else {}
+            search_result.append(
+                SearchChunk(
+                    id=chunk["id"],
+                    content=chunk["content"],
+                    doc_id=doc_info.get("doc_id"),
+                    doc_name=doc_info.get("doc_name"),
+                )
+            )
 
         return SearchKnowledgeResult(result_list=search_result)
     except ToolError:

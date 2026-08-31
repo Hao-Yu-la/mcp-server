@@ -166,6 +166,11 @@ Parameters:
   - `op` (string, required): specifies the query operator that defines the filtering logic. Valid values are 'must' and 'must_not', 'must' means results must satisfy the condition (inclusion filter),'must_not' means results must not satisfy the condition (exclusion filter).
   - `field` (string, required): indicates the specific document field to apply the filter on (e.g., "doc_id").
   - `conds` (array, required):  contains the concrete values used for filtering. The data type of elements in the array depends on the field.
+
+Each result contains the chunk `id` and `content`, plus the source document's
+`doc_id` and `doc_name`. The metadata fields are `null` when Viking does not
+provide them. A non-null `doc_id` can be passed directly to `get_doc`.
+
 ## MCP Integration
 
 To add this server to your MCP configuration, add the following to your MCP settings file:
