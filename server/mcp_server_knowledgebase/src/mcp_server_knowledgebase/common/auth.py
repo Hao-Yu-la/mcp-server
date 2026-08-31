@@ -13,12 +13,11 @@ def prepare_request(
     sk = sk.strip() if isinstance(sk, str) else sk
     api_key = api_key.strip() if isinstance(api_key, str) else api_key
 
-    if bool(ak) != bool(sk):
-        raise ValueError("AK and SK must be configured together")
-    if bool(api_key) == bool(ak and sk):
-        raise ValueError(
-            "Configure exactly one authentication method: VIKING_API_KEY or AK/SK"
-        )
+    if not api_key:
+        if bool(ak) != bool(sk):
+            raise ValueError("AK and SK must be configured together")
+        if not ak or not sk:
+            raise ValueError("Configure an authentication method: VIKING_API_KEY or AK/SK")
 
     if params:
         for key in params:

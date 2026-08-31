@@ -59,17 +59,18 @@ Trae | Cursor ｜ Claude Desktop | Cline | ...
 
 ### 环境变量
 
-鉴权配置必须二选一：仅配置 `VIKING_API_KEY`，或同时配置
+鉴权至少需要配置一种方式：配置 `VIKING_API_KEY`，或同时配置
 `VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`。API Key 模式会通过
 `Authorization: Bearer <VIKING_API_KEY>` 请求头鉴权；AK/SK 模式继续使用
-SignerV4。两种方式同时配置、均未配置，或只配置 AK/SK 中的一项时，服务将
+SignerV4。两种方式可以同时配置，此时 `VIKING_API_KEY` 优先，AK/SK 会被
+忽略。未配置 API Key 时，AK 和 SK 必须同时提供；没有可用鉴权方式时服务将
 启动失败。
 
 以下环境变量可用于配置MCP服务器:
 
 | 环境变量                     | 描述              | 默认值 |
 |--------------------------|-----------------|-------|
-| `VIKING_API_KEY`          | 知识库 API Key（二选一） | - |
+| `VIKING_API_KEY`          | 知识库 API Key（配置时优先使用） | - |
 | `VOLCENGINE_ACCESS_KEY`  | 火山引擎账号ACCESSKEY | - |
 | `VOLCENGINE_SECRET_KEY`  | 火山引擎账号SECRETKEY | - |
 | `KNOWLEDGE_BASE_PROJECT` | 知识库所属项目         | `default` |
@@ -183,8 +184,8 @@ Parameters:
 }
 ```
 
-也可以删除 `VIKING_API_KEY`，改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
-`VOLCENGINE_SECRET_KEY`。
+也可以额外或改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
+`VOLCENGINE_SECRET_KEY`。三个变量均配置时，优先使用 `VIKING_API_KEY`。
 
 ## 证书
 volcengine/mcp-server is licensed under the [MIT License](https://github.com/volcengine/mcp-server/blob/main/LICENSE).

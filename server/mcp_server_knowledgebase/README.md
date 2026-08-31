@@ -30,15 +30,16 @@ uv pip install -e .
 
 ### Configuration
 
-The server requires exactly one authentication method:
+The server requires at least one authentication method:
 
-- API key: set `VIKING_API_KEY` only. Requests use
+- API key: set `VIKING_API_KEY`. Requests use
   `Authorization: Bearer <VIKING_API_KEY>`.
 - AK/SK: set both `VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`.
   Requests use VolcEngine SignerV4 authentication.
 
-The server rejects configurations that provide both methods, neither method,
-or only one member of the AK/SK pair.
+When both methods are configured, `VIKING_API_KEY` takes precedence and AK/SK
+is ignored. When no API key is configured, AK and SK must be provided together.
+The server rejects configurations with no usable authentication method.
 
 Optional environment variables:
 - `KNOWLEDGE_BASE_PROJECT`: Viking Knowledge Base project name (default: `default`)
@@ -195,8 +196,9 @@ To add this server to your MCP configuration, add the following to your MCP sett
 }
 ```
 
-Alternatively, replace `VIKING_API_KEY` with both
-`VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`.
+You may alternatively or additionally configure both
+`VOLCENGINE_ACCESS_KEY` and `VOLCENGINE_SECRET_KEY`. If all three variables are
+set, `VIKING_API_KEY` takes precedence.
 
 ## Troubleshooting
 
@@ -204,7 +206,7 @@ Alternatively, replace `VIKING_API_KEY` with both
 
 1. **Authentication Errors**
    - Verify your API key or AK/SK credentials are correct
-   - Ensure exactly one authentication method is configured
+   - Ensure at least one authentication method is configured
    - Check that you have the necessary permissions for the collection
 
 2. **Connection Timeouts**

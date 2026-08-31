@@ -30,17 +30,16 @@ def load_config() -> KnowledgeBaseConfig:
     sk = _credential_from_env("VOLCENGINE_SECRET_KEY")
     api_key = _credential_from_env("VIKING_API_KEY")
 
-    if bool(ak) != bool(sk):
+    if not api_key and bool(ak) != bool(sk):
         error_msg = (
             "VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY must be configured together"
         )
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-    has_ak_sk = bool(ak and sk)
-    if bool(api_key) == has_ak_sk:
+    if not api_key and not (ak and sk):
         error_msg = (
-            "Configure exactly one authentication method: VIKING_API_KEY or "
+            "Configure an authentication method: VIKING_API_KEY or "
             "VOLCENGINE_ACCESS_KEY with VOLCENGINE_SECRET_KEY"
         )
         logger.error(error_msg)
