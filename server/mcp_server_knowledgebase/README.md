@@ -183,7 +183,7 @@ To add this server to your MCP configuration, add the following to your MCP sett
       "command": "uvx",
         "args": [
           "--from",
-          "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
+          "mcp-server-knowledgebase>=0.2.0",
           "mcp-server-knowledgebase"
       ],
       "env": {

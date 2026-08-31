@@ -171,7 +171,7 @@ Parameters:
       "command": "uvx",
         "args": [
           "--from",
-          "git+https://github.com/volcengine/mcp-server#subdirectory=server/mcp_server_knowledgebase",
+          "mcp-server-knowledgebase>=0.2.0",
           "mcp-server-knowledgebase"
       ],
       "env": {
