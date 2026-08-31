@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -9,34 +9,48 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KnowledgeBaseConfig:
     """Configuration for Viking Knowledge Base MCP Server."""
-    ak: str
-    sk: str
+
+    ak: Optional[str] = None
+    sk: Optional[str] = None
     project: Optional[str] = None
     region: str = "cn-north-1"
+    api_key: Optional[str] = None
+
+
+def _credential_from_env(name: str) -> Optional[str]:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    return value.strip() or None
 
 
 def load_config() -> KnowledgeBaseConfig:
     """Load configuration from environment variables."""
-    required_vars = [
-        "VOLCENGINE_ACCESS_KEY",
-        "VOLCENGINE_SECRET_KEY",
-        "KNOWLEDGE_BASE_PROJECT",
-        "KNOWLEDGE_BASE_REGION",
-    ]
+    ak = _credential_from_env("VOLCENGINE_ACCESS_KEY")
+    sk = _credential_from_env("VOLCENGINE_SECRET_KEY")
+    api_key = _credential_from_env("VIKING_API_KEY")
 
-    # Check if all required environment variables are set
-    missing_vars = [var for var in required_vars if not os.environ.get(var)]
-    if missing_vars:
-        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+    if not api_key and bool(ak) != bool(sk):
+        error_msg = (
+            "VOLCENGINE_ACCESS_KEY and VOLCENGINE_SECRET_KEY must be configured together"
+        )
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-    # Load configuration from environment variables
+    if not api_key and not (ak and sk):
+        error_msg = (
+            "Configure an authentication method: VIKING_API_KEY or "
+            "VOLCENGINE_ACCESS_KEY with VOLCENGINE_SECRET_KEY"
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
     return KnowledgeBaseConfig(
-        ak=os.environ["VOLCENGINE_ACCESS_KEY"],
-        sk=os.environ["VOLCENGINE_SECRET_KEY"],
-        project=os.environ.get("KNOWLEDGE_BASE_PROJECT","default"),
-        region=os.environ.get("KNOWLEDGE_BASE_REGION", "cn-north-1")
+        ak=ak,
+        sk=sk,
+        api_key=api_key,
+        project=os.environ.get("KNOWLEDGE_BASE_PROJECT", "default"),
+        region=os.environ.get("KNOWLEDGE_BASE_REGION", "cn-north-1"),
     )
 
 
