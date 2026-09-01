@@ -1,191 +1,392 @@
 # Viking Knowledge Base MCP Server
 
-## 产品描述
+[English](README.md)
 
-Viking Knowledge Base MCP Server 是一个模型上下文协议(Model Context Protocol)服务器，为MCP客户端(如Claude Desktop)提供与火山引擎知识库KnowledgeBase服务交互的能力。知识库MCP Server支持获取用户账号下的所有知识库列表，并在指定的知识库中检索结果。同时支持您以url上传的方式将文档上传到您的知识库,也支持查看文档和知识库的状态信息。
+## 产品介绍
 
-## 分类
-其他
+Viking Knowledge Base MCP Server 让 Claude Desktop、Cursor、Cline、Trae
+等 MCP 客户端能够与火山引擎 Viking 知识库交互，支持管理和查看知识库及
+文档，并从知识库中检索相关知识切片。
 
 ## 功能
 
-- 获取用户账号下的所有知识库列表
-- 在指定的知识库中检索结果
-- 以url上传的方式将文档上传到您的知识库
-- 查看文档的处理状态
-- 查看知识库的状态
+- 通过 URL 向知识库添加文档
+- 获取文档信息和处理状态
+- 使用游标分页获取文档列表
+- 获取知识库信息和构建状态
+- 获取已配置 Project 下的知识库列表
+- 在知识库中检索，并支持可选的文档过滤条件
+- 支持 Viking API Key 或火山引擎 AK/SK 鉴权
+- 支持 stdio 和无状态 Streamable HTTP 传输
 
-## 使用指南
+## 前置条件
 
-### 前置准备
-- Python 3.10+
-- UV
-- 知识库 API Key 或火山引擎 AK/SK
+- Python 3.10 或更高版本
+- Viking 知识库 API Key，或火山引擎 AK/SK 凭证
 
-### 安装
-克隆仓库:
+## 安装
+
+从 PyPI 安装：
+
 ```bash
-git clone git@github.com:volcengine/mcp-server.git
+pip install mcp-server-knowledgebase
 ```
 
-### 使用方法
-启动服务器:
+也可以使用 `uv` 将其安装为持久可用的命令行工具：
 
-#### UV
 ```bash
+uv tool install mcp-server-knowledgebase
+```
+
+本地开发时，克隆仓库并以 editable 模式安装当前软件包：
+
+```bash
+git clone https://github.com/volcengine/mcp-server.git
 cd mcp-server/server/mcp_server_knowledgebase
-uv run mcp-server-knowledgebase
-
-# 使用无状态 Streamable HTTP 模式启动（默认为 stdio）
-uv run mcp-server-knowledgebase -t streamable-http
-```
-
-Streamable HTTP 默认地址为 `http://127.0.0.1:8000/mcp`。在可信网关后部署时，
-可设置 `MCP_SERVER_HOST=0.0.0.0`。
-
-Server 使用 MCP Python SDK 2.x，支持 `2026-07-28` 协议修订版及
-`server/discover` 无状态协商，同时由 SDK 自动兼容旧版握手客户端。
-旧 HTTP+SSE 已被新协议弃用，因此本 Server 不再提供 SSE 启动模式。
-
-Streamable HTTP 本身不会把知识库 API Key 或火山引擎 AK/SK 转换成 MCP 调用方认证。
-远程部署必须放在认证网关之后或接入兼容 MCP 的 OAuth，且不得向调用方暴露服务凭证。
-
-使用客户端与服务器交互:
-```
-Trae | Cursor ｜ Claude Desktop | Cline | ...
+uv pip install -e .
 ```
 
 ## 配置
 
+### 鉴权
+
+至少配置一种鉴权方式：
+
+- API Key：设置 `VIKING_API_KEY`，请求使用
+  `Authorization: Bearer <VIKING_API_KEY>`。
+- AK/SK：同时设置 `VOLCENGINE_ACCESS_KEY` 和
+  `VOLCENGINE_SECRET_KEY`，请求使用火山引擎 SignerV4 鉴权。
+
+同时配置两种方式时，优先使用 `VIKING_API_KEY`。未配置 API Key 时，
+Access Key 和 Secret Key 必须成对配置。
+
 ### 环境变量
 
-鉴权至少需要配置一种方式：配置 `VIKING_API_KEY`，或同时配置
-`VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`。API Key 模式会通过
-`Authorization: Bearer <VIKING_API_KEY>` 请求头鉴权；AK/SK 模式继续使用
-SignerV4。两种方式可以同时配置，此时 `VIKING_API_KEY` 优先，AK/SK 会被
-忽略。未配置 API Key 时，AK 和 SK 必须同时提供；没有可用鉴权方式时服务将
-启动失败。
+| 环境变量 | 描述 | 默认值 |
+|---|---|---|
+| `VIKING_API_KEY` | Viking 知识库 API Key；配置后优先使用 | - |
+| `VOLCENGINE_ACCESS_KEY` | 火山引擎 Access Key | - |
+| `VOLCENGINE_SECRET_KEY` | 火山引擎 Secret Key | - |
+| `KNOWLEDGE_BASE_PROJECT` | Viking 知识库所属 Project | `default` |
+| `KNOWLEDGE_BASE_REGION` | AK/SK 签名使用的火山引擎地域 | `cn-north-1` |
+| `KNOWLEDGE_BASE_TIMEOUT` | 上游请求超时时间，单位为秒 | `30` |
+| `MCP_SERVER_HOST` | Streamable HTTP 监听地址 | `127.0.0.1` |
+| `MCP_SERVER_PORT` | Streamable HTTP 端口；未设置时读取 `PORT` | `8000` |
+| `STREAMABLE_HTTP_PATH` | Streamable HTTP 端点路径 | `/mcp` |
 
-以下环境变量可用于配置MCP服务器:
+## 启动服务器
 
-| 环境变量                     | 描述              | 默认值 |
-|--------------------------|-----------------|-------|
-| `VIKING_API_KEY`          | 知识库 API Key（配置时优先使用） | - |
-| `VOLCENGINE_ACCESS_KEY`  | 火山引擎账号ACCESSKEY | - |
-| `VOLCENGINE_SECRET_KEY`  | 火山引擎账号SECRETKEY | - |
-| `KNOWLEDGE_BASE_PROJECT` | 知识库所属项目         | `default` |
-| `KNOWLEDGE_BASE_REGION`  | 知识库区域           | cn-north-1 |
-| `MCP_SERVER_HOST`        | Streamable HTTP 监听地址 | `127.0.0.1` |
-| `MCP_SERVER_PORT`        | Streamable HTTP 端口（兼容 `PORT`） | `8000` |
-| `STREAMABLE_HTTP_PATH`   | Streamable HTTP 路径 | `/mcp` |
-| `KNOWLEDGE_BASE_TIMEOUT` | 上游请求超时（秒） | `30` |
+使用默认的 stdio 传输方式启动：
 
+```bash
+mcp-server-knowledgebase
+```
+
+无需持久安装即可直接运行已发布的软件包：
+
+```bash
+uvx --from mcp-server-knowledgebase mcp-server-knowledgebase
+```
+
+也可以在源码目录中直接运行模块：
+
+```bash
+python -m mcp_server_knowledgebase.server --transport stdio
+```
+
+使用无状态 Streamable HTTP 启动：
+
+```bash
+mcp-server-knowledgebase --transport streamable-http
+```
+
+默认端点为 `http://127.0.0.1:8000/mcp`。仅在可信网关后部署时设置
+`MCP_SERVER_HOST=0.0.0.0`。
+
+### MCP 协议与部署安全
+
+服务器使用 MCP Python SDK 2.x，支持 `2026-07-28` 协议修订版，包括无状态
+`server/discover` 协商。SDK 同时兼容基于旧版握手的客户端。由于 HTTP+SSE
+已被 `2026-07-28` 规范弃用，本服务器不再提供该传输方式。
+
+Streamable HTTP 不会自动把已配置的 Viking API Key 或火山引擎 AK/SK
+转换成 MCP 调用方鉴权。远程部署时必须使用认证网关或兼容 MCP 的 OAuth，
+并且不要向调用方暴露服务凭证。
 
 ## 可用工具
 
-Knowledge Base MCP Server 提供以下功能
+- [`add_doc`](https://www.volcengine.com/docs/84313/1254624)：通过 URL 添加文档
+- [`get_doc`](https://www.volcengine.com/docs/84313/1254615)：获取文档信息和处理状态
+- [`list_docs`](https://docs.volcengine.com/docs/84313/2477871?lang=zh)：使用游标分页获取文档列表
+- [`get_collection`](https://www.volcengine.com/docs/84313/1254602)：获取知识库信息
+- [`list_collections`](https://www.volcengine.com/docs/84313/1254596)：获取已配置 Project 下的知识库列表
+- [`search_knowledge`](https://www.volcengine.com/docs/84313/1350012)：在知识库中检索知识
 
-- `add_doc`: [上传文档（目前仅支持url）](https://www.volcengine.com/docs/84313/1254624)
-- `get_doc`: [获取指定文档的状态](https://www.volcengine.com/docs/84313/1254615)
-- `get_collection`: [获取知识库的详细信息](https://www.volcengine.com/docs/84313/1254602)
-- `list_colletions`: [获取指定账户和Project下的知识库列表](https://www.volcengine.com/docs/84313/1254596)
-- `search_knowledge`: [在指定知识库中进行搜索](https://www.volcengine.com/docs/84313/1350012)
+### `add_doc`
 
-#### add_doc
+通过 URL 向知识库添加支持的文档。
 
 ```python
 add_doc(
-    collection_name="collection_name",
+    collection_name="product_docs",
     add_type="url",
-    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
-    doc_name="doc_xxxx",
+    doc_id="product_guide_2026",
+    doc_name="Product Guide",
     doc_type="pdf",
-    url="http://xxxxx.pdf"
+    url="https://example.com/product-guide.pdf",
 )
 ```
 
-Parameters:
-- `collection_name` (必须): 要上传文档的知识库名称
-- `add_type` (必须): 上传文档的添加类型, mcp server目前仅支持url
-- `doc_id` (必须): url上传方式需要指定doc_id
-- `doc_name` (必须): url 上传方式需要指定doc_name.
-- `doc_type` (必须): 要添加的文档的类型。对于结构化文档，支持 xlsx、csv 和 jsonl；对于非结构化文档，我们支持 txt、doc、docx、pdf、markdown、faq.xlsx 和 pptx
-- `url` (必须): 待添加文档的 URL
+参数：
 
-#### get_doc
+- `collection_name`（必填）：目标知识库名称。
+- `add_type`（必填）：目前仅支持 `"url"`。
+- `doc_id`（必填）：仅包含英文字母、数字和下划线的唯一 ID，必须以英文字母
+  开头，长度为 1–128 个字符。
+- `doc_name`（必填）：文档名称，长度为 1–256 个字符。
+- `doc_type`（必填）：可选值为 `xlsx`、`csv`、`jsonl`、`txt`、`doc`、
+  `docx`、`pdf`、`markdown`、`faq.xlsx` 或 `pptx`。
+- `url`（必填）：可访问的文档 URL。
+
+返回示例：
+
+```json
+{
+  "collection_name": "product_docs",
+  "doc_id": "product_guide_2026"
+}
+```
+
+### `get_doc`
+
+获取文档元数据和处理状态。
 
 ```python
 get_doc(
-    collection_name="collection_name",
-    doc_id="mcp_server_auto_gen_doc_id_xxxxxxx",
+    collection_name="product_docs",
+    doc_id="product_guide_2026",
 )
 ```
 
-Parameters:
-- `collection_name` (必须): 要获取信息的文档所属的知识库
-- `doc_id` (必须): 要获取信息的文档ID
+参数：
 
-#### get_collection
+- `collection_name`（必填）：文档所属的知识库。
+- `doc_id`（必填）：文档 ID。
+
+返回示例：
+
+```json
+{
+  "collection_name": "product_docs",
+  "doc_id": "product_guide_2026",
+  "doc_name": "Product Guide",
+  "doc_type": "pdf",
+  "url": "https://example.com/product-guide.pdf",
+  "add_type": "url",
+  "create_time": 1788220800,
+  "update_time": 1788220860,
+  "point_num": 53,
+  "status": {
+    "process_status": 0,
+    "failed_code": null
+  }
+}
+```
+
+`process_status` 状态值：`0` 表示处理完成，`1` 表示处理失败，`2` 或 `3`
+表示排队中，`5` 表示删除中，`6` 表示处理中。Viking 未返回的字段为 `null`；
+上游返回的其他文档字段也会保留。
+
+### `list_docs`
+
+使用游标分页获取知识库中的文档列表。
 
 ```python
-get_collection(
-    collection_name="collection_name",
+list_docs(
+    collection_name="product_docs",
+    limit=2,
+    next_token=None,
 )
 ```
 
-Parameters:
-- `collection_name` (必须): 要获取信息的知识库名称
+参数：
 
+- `collection_name`（必填）：要获取文档列表的知识库。
+- `limit`（可选）：单次返回的文档数量，范围为 1–100，默认值为 `100`。
+- `next_token`（可选）：上一次调用返回的不透明游标。首次请求不传；返回值中的
+  游标为空表示文档已全部返回。
 
-#### list_collections
+返回示例：
+
+```json
+{
+  "collection_name": "product_docs",
+  "total_num": 3,
+  "count": 2,
+  "doc_list": [
+    {
+      "collection_name": "product_docs",
+      "doc_id": "product_guide_2026",
+      "doc_name": "Product Guide",
+      "doc_type": "pdf",
+      "url": "https://example.com/product-guide.pdf",
+      "add_type": "url",
+      "create_time": 1788220800,
+      "update_time": 1788220860,
+      "point_num": 53,
+      "status": {
+        "process_status": 0
+      },
+      "brief_summary": "An introduction to the product.",
+      "total_tokens": 345
+    }
+  ],
+  "has_more": true,
+  "next_token": "opaque-cursor-for-next-page"
+}
+```
+
+Viking 未提供 `total_num` 时，该字段为 `null`。文档条目会保留摘要、token 数
+等上游扩展字段。
+
+### `get_collection`
+
+获取知识库信息和构建状态。
+
+```python
+get_collection(collection_name="product_docs")
+```
+
+参数：
+
+- `collection_name`（必填）：知识库名称。
+
+返回示例：
+
+```json
+{
+  "collection_name": "product_docs",
+  "description": "Product manuals and release notes",
+  "status": 1
+}
+```
+
+知识库状态值：`-1` 表示待构建，`0` 表示构建中，`1` 表示构建完成，`2`
+表示构建失败，`3` 表示变更中。
+
+### `list_collections`
+
+获取全局配置 Project 下的所有知识库。
 
 ```python
 list_collections()
 ```
 
-#### search_knowledge
+此工具没有参数。
+
+返回示例：
+
+```json
+{
+  "collection_list": [
+    {
+      "collection_name": "product_docs",
+      "description": "Product manuals and release notes"
+    },
+    {
+      "collection_name": "support_faq",
+      "description": "Frequently asked support questions"
+    }
+  ]
+}
+```
+
+### `search_knowledge`
+
+在知识库中检索相关切片。可选的文档过滤条件可以包含或排除匹配的文档字段值。
 
 ```python
 search_knowledge(
-    query="How to reset my password?",
+    query="How do I reset my password?",
+    collection_name="support_faq",
     limit=3,
-    collection_name="collection_name"
+    doc_filter={
+        "op": "must",
+        "field": "doc_id",
+        "conds": ["account_guide"],
+    },
 )
 ```
 
-Parameters:
-- `query` (必须): 搜索查询字符串
-- `limit` (可选): 返回的最大结果数，范围 1–100（默认值：3）
-- `collection_name` (必须): 要搜索的知识库名称
+参数：
 
-每条结果包含分块的 `id`、`content`，以及来源文档的 `doc_id` 和
-`doc_name`；Viking 未提供文档元数据时，这两个字段为 `null`。非空的
+- `query`（必填）：检索问题。
+- `collection_name`（必填）：要检索的知识库。
+- `limit`（可选）：返回的最大切片数量，范围为 1–100，默认值为 `3`。
+- `doc_filter`（可选）：包含以下字段的对象：
+  - `op`：`"must"` 表示包含匹配结果，`"must_not"` 表示排除匹配结果。
+  - `field`：要过滤的文档字段，例如 `"doc_id"`。
+  - `conds`：用于匹配的非空值列表。
+
+返回示例：
+
+```json
+{
+  "result_list": [
+    {
+      "id": "chunk_001",
+      "content": "Open Account Settings and select Reset Password.",
+      "doc_id": "account_guide",
+      "doc_name": "Account Guide"
+    }
+  ]
+}
+```
+
+Viking 未提供文档元数据时，`doc_id` 和 `doc_name` 为 `null`。非空的
 `doc_id` 可以直接传给 `get_doc`。
 
+## MCP 客户端配置
 
-### uvx 启动
+下面是使用 `uvx` 和 Viking API Key 的 stdio 配置示例：
+
 ```json
 {
   "mcpServers": {
     "knowledgebase": {
       "command": "uvx",
-        "args": [
-          "--from",
-          "mcp-server-knowledgebase>=0.2.0",
-          "mcp-server-knowledgebase"
+      "args": [
+        "--from",
+        "mcp-server-knowledgebase>=0.2.0",
+        "mcp-server-knowledgebase"
       ],
       "env": {
         "VIKING_API_KEY": "your-viking-api-key",
         "KNOWLEDGE_BASE_PROJECT": "your-project-name",
-        "KNOWLEDGE_BASE_REGION": "your-region"
+        "KNOWLEDGE_BASE_REGION": "cn-north-1"
       }
     }
   }
 }
 ```
 
-也可以额外或改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
-`VOLCENGINE_SECRET_KEY`。三个变量均配置时，优先使用 `VIKING_API_KEY`。
+也可以改为同时配置 `VOLCENGINE_ACCESS_KEY` 和
+`VOLCENGINE_SECRET_KEY`。三种凭证均存在时，优先使用 `VIKING_API_KEY`。
 
-## 证书
-volcengine/mcp-server is licensed under the [MIT License](https://github.com/volcengine/mcp-server/blob/main/LICENSE).
+## 故障排查
+
+1. 鉴权错误
+   - 检查 API Key 或 AK/SK 凭证。
+   - 使用 AK/SK 时，必须同时配置两个值。
+   - 检查凭证是否有权访问已配置的 Project 和知识库。
+2. 连接超时
+   - 检查到火山引擎 API 的网络连接。
+   - 必要时调整 `KNOWLEDGE_BASE_TIMEOUT`。
+3. 返回结果为空
+   - 检查 Project 和知识库名称。
+   - 检索时尝试扩大问题范围或移除文档过滤条件。
+   - 获取文档列表时，只能继续使用上一次调用原样返回的 `next_token`。
+
+## 许可证
+
+本项目使用 [MIT License](https://github.com/volcengine/mcp-server/blob/main/LICENSE)。
