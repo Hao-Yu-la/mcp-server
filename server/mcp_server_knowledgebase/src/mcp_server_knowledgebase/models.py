@@ -40,6 +40,15 @@ class DocumentInfo(BaseModel):
     status: Optional[DocumentStatus] = None
 
 
+class ListDocumentsResult(BaseModel):
+    collection_name: str
+    total_num: Optional[int] = None
+    count: int
+    doc_list: list[DocumentInfo]
+    has_more: bool
+    next_token: Optional[str] = None
+
+
 class CollectionInfoResult(BaseModel):
     collection_name: str
     description: str

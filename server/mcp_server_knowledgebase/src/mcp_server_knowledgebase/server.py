@@ -19,6 +19,7 @@ from mcp_server_knowledgebase.models import (
     DocFilter,
     DocumentInfo,
     ListCollectionsResult,
+    ListDocumentsResult,
     SearchChunk,
     SearchKnowledgeResult,
 )
@@ -37,6 +38,7 @@ list_collections_path = "/api/knowledge/collection/list"
 get_collections_path = "/api/knowledge/collection/info"
 doc_add_path = "/api/knowledge/doc/add"
 doc_info_path = "/api/knowledge/doc/info"
+list_docs_path = "/api/knowledge/doc/v2/list"
 
 # Create MCP server
 mcp = MCPServer(
@@ -220,6 +222,54 @@ async def get_doc(
         raise
     except Exception as e:
         logger.error(f"Error in get_doc: {str(e)}")
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def list_docs(
+    collection_name: Annotated[str, Field(min_length=1)],
+    limit: Annotated[int, Field(ge=1, le=100)] = 100,
+    next_token: Optional[str] = None,
+) -> ListDocumentsResult:
+    """List documents in a knowledge base collection using cursor pagination.
+
+    Args:
+        collection_name: The knowledge base collection to list documents from.
+        limit: The maximum number of documents to return, from 1 to 100.
+        next_token: The opaque cursor returned by the previous request. Omit it
+            to retrieve the first page.
+
+    Returns:
+        The documents in the current page and the cursor for the next page.
+        An empty next_token indicates that all documents have been returned.
+    """
+    try:
+        if not collection_name:
+            raise ValueError("Collection name cannot be empty.")
+
+        request_params = {
+            "collection_name": collection_name,
+            "project": config.project,
+            "limit": limit,
+        }
+        if next_token is not None:
+            request_params["next_token"] = next_token
+
+        result = await _request_knowledgebase(list_docs_path, request_params)
+        if result["code"] != 0:
+            logger.error(f"Error in list_docs: {result['message']}")
+            raise ToolError(result["message"])
+
+        list_data = result.get("data")
+        if not list_data:
+            raise ValueError(f"Collection {collection_name} has no document list data.")
+
+        return ListDocumentsResult.model_validate(list_data)
+
+    except ToolError:
+        raise
+    except Exception as e:
+        logger.error(f"Error in list_docs: {str(e)}")
         raise ToolError(str(e)) from e
 
 
