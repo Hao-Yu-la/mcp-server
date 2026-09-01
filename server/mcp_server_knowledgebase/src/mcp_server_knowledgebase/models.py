@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,7 +20,7 @@ class DocumentStatus(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     process_status: Optional[int] = None
-    failed_code: Optional[str] = None
+    failed_code: Optional[Union[int, str]] = None
 
 
 class DocumentInfo(BaseModel):
