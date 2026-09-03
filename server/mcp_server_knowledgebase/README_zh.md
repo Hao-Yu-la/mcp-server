@@ -357,7 +357,7 @@ Viking 未提供文档元数据时，`doc_id` 和 `doc_name` 为 `null`。非空
       "command": "uvx",
       "args": [
         "--from",
-        "mcp-server-knowledgebase>=0.2.0",
+        "mcp-server-knowledgebase>=0.2.1",
         "mcp-server-knowledgebase"
       ],
       "env": {

@@ -43,7 +43,7 @@ list_docs_path = "/api/knowledge/doc/v2/list"
 # Create MCP server
 mcp = MCPServer(
     "Knowledgebase MCP Server",
-    version="0.2.0",
+    version="0.2.1",
     cache_hints={"tools/list": CacheHint(ttl_ms=300_000, scope="public")},
 )
 
@@ -83,6 +83,26 @@ async def _request_knowledgebase(path: str, data: Dict[str, Any]) -> Dict[str, A
         ) as response:
             response.raise_for_status()
             return await response.json()
+
+
+async def _call_kb(path: str, params: Dict[str, Any], tool_name: str) -> Any:
+    """Call a Knowledge Base API and return its non-empty response data."""
+    try:
+        result = await _request_knowledgebase(path, params)
+        if result["code"] != 0:
+            raise ToolError(result["message"])
+
+        data = result.get("data")
+        if not data:
+            raise ValueError(f"{tool_name} returned no data")
+
+        return data
+    except ToolError as e:
+        logger.error(f"Error in {tool_name}: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in {tool_name}: {str(e)}")
+        raise ToolError(str(e)) from e
 
 
 @mcp.tool(
@@ -134,36 +154,18 @@ async def add_doc(
         doc_id: the doc_id of document user added to collection.
 
     """
-    try:
-        if not collection_name:
-            raise ValueError("Collection name cannot be empty.")
+    request_params = {
+        "collection_name": collection_name,
+        "project": config.project,
+        "add_type": add_type,
+        "doc_id": doc_id,
+        "doc_name": doc_name,
+        "doc_type": doc_type,
+        "url": url,
+    }
 
-        request_params = {
-            "collection_name": collection_name,
-            "project": config.project,
-            "add_type": add_type,
-            "doc_id": doc_id,
-            "doc_name": doc_name,
-            "doc_type": doc_type,
-            "url": url,
-        }
-
-        result = await _request_knowledgebase(doc_add_path, request_params)
-        if result['code'] != 0:
-            logger.error(f"Error in add_doc: {result['message']}")
-            raise ToolError(result['message'])
-
-        doc_add_data = result['data']
-        if not doc_add_data:
-            raise ValueError(f"doc {doc_id} has no data.")
-
-        return AddDocumentResult(collection_name=collection_name, doc_id=doc_id)
-
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in add_doc: {str(e)}")
-        raise ToolError(str(e)) from e
+    await _call_kb(doc_add_path, request_params, "add_doc")
+    return AddDocumentResult(collection_name=collection_name, doc_id=doc_id)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
@@ -197,32 +199,14 @@ async def get_doc(
             - failed_code: the status message of the document.
     """
 
-    try:
-        if not collection_name:
-            raise ValueError("Collection name cannot be empty.")
+    request_params = {
+        "collection_name": collection_name,
+        "project": config.project,
+        "doc_id": doc_id,
+    }
 
-        request_params = {
-            "collection_name": collection_name,
-            "project": config.project,
-            "doc_id": doc_id,
-        }
-
-        result = await _request_knowledgebase(doc_info_path, request_params)
-        if result['code'] != 0:
-            logger.error(f"Error in get_doc: {result['message']}")
-            raise ToolError(result['message'])
-
-        doc_info_data = result['data']
-        if not doc_info_data:
-            raise ValueError(f"doc {doc_id} not found.")
-
-        return DocumentInfo.model_validate(doc_info_data)
-
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in get_doc: {str(e)}")
-        raise ToolError(str(e)) from e
+    doc_info_data = await _call_kb(doc_info_path, request_params, "get_doc")
+    return DocumentInfo.model_validate(doc_info_data)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
@@ -243,34 +227,16 @@ async def list_docs(
         The documents in the current page and the cursor for the next page.
         An empty next_token indicates that all documents have been returned.
     """
-    try:
-        if not collection_name:
-            raise ValueError("Collection name cannot be empty.")
+    request_params = {
+        "collection_name": collection_name,
+        "project": config.project,
+        "limit": limit,
+    }
+    if next_token is not None:
+        request_params["next_token"] = next_token
 
-        request_params = {
-            "collection_name": collection_name,
-            "project": config.project,
-            "limit": limit,
-        }
-        if next_token is not None:
-            request_params["next_token"] = next_token
-
-        result = await _request_knowledgebase(list_docs_path, request_params)
-        if result["code"] != 0:
-            logger.error(f"Error in list_docs: {result['message']}")
-            raise ToolError(result["message"])
-
-        list_data = result.get("data")
-        if not list_data:
-            raise ValueError(f"Collection {collection_name} has no document list data.")
-
-        return ListDocumentsResult.model_validate(list_data)
-
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in list_docs: {str(e)}")
-        raise ToolError(str(e)) from e
+    list_data = await _call_kb(list_docs_path, request_params, "list_docs")
+    return ListDocumentsResult.model_validate(list_data)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
@@ -296,35 +262,19 @@ async def get_collection(
 
     """
 
-    try:
-        if not collection_name:
-            raise ValueError("Collection name cannot be empty.")
+    request_params = {
+        "name": collection_name,
+        "project": config.project,
+    }
 
-        request_params = {
-            "name": collection_name,
-            "project": config.project,
-        }
-
-        result = await _request_knowledgebase(get_collections_path, request_params)
-        if result['code'] != 0:
-            logger.error(f"Error in search_knowledge: {result['message']}")
-            raise ToolError(result['message'])
-
-        collection_info = result['data']
-        if not collection_info:
-            raise ValueError(f"Collection {collection_name} not found.")
-
-        return CollectionInfoResult(
-            collection_name=collection_info["collection_name"],
-            description=collection_info["description"],
-            status=collection_info["pipeline_list"][0]["index_list"][0]["status"],
-        )
-
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in get_collection: {str(e)}")
-        raise ToolError(str(e)) from e
+    collection_info = await _call_kb(
+        get_collections_path, request_params, "get_collection"
+    )
+    return CollectionInfoResult(
+        collection_name=collection_info["collection_name"],
+        description=collection_info["description"],
+        status=collection_info["pipeline_list"][0]["index_list"][0]["status"],
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
@@ -340,35 +290,25 @@ async def list_collections() -> ListCollectionsResult:
 
     """
 
-    try:
-        request_params = {
-            "project": config.project,
-        }
+    request_params = {
+        "project": config.project,
+    }
 
-        result = await _request_knowledgebase(list_collections_path, request_params)
-        if result['code'] != 0:
-            logger.error(f"Error in list_collections: {result['message']}")
-            raise ToolError(result['message'])
+    list_data = await _call_kb(
+        list_collections_path, request_params, "list_collections"
+    )
+    collections = list_data["collection_list"]
 
-        collections = result['data']['collection_list']
-
-        collection_list = []
-
-        for collection in collections:
-            collection_list.append(
-                CollectionSummary(
-                    collection_name=collection["collection_name"],
-                    description=collection["description"],
-                )
+    collection_list = []
+    for collection in collections:
+        collection_list.append(
+            CollectionSummary(
+                collection_name=collection["collection_name"],
+                description=collection["description"],
             )
+        )
 
-        return ListCollectionsResult(collection_list=collection_list)
-
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in list_collections: {str(e)}")
-        raise ToolError(str(e)) from e
+    return ListCollectionsResult(collection_list=collection_list)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
@@ -402,49 +342,37 @@ async def search_knowledge(
         doc_name: the name of the document containing the chunk, when available.
     """
 
-    try:
-        if not collection_name:
-            raise ValueError("Collection name cannot be empty.")
+    request_params = {
+        "query": query,
+        "limit": limit,
+        "name": collection_name,
+        "project": config.project,
+    }
 
-        request_params = {
-            "query": query,
-            "limit": limit,
-            "name": collection_name,
-            "project": config.project,
+    if doc_filter:
+        request_params['query_param'] = {
+            "doc_filter": doc_filter.model_dump(mode="json"),
         }
 
-        if doc_filter:
-            request_params['query_param'] = {
-                "doc_filter": doc_filter.model_dump(mode="json"),
-            }
+    search_data = await _call_kb(
+        search_knowledge_path, request_params, "search_knowledge"
+    )
+    chunks = search_data.get('result_list', [])
 
-        result = await _request_knowledgebase(search_knowledge_path, request_params)
-        if result['code'] != 0:
-            logger.error(f"Error in search_knowledge: {result['message']}")
-            raise ToolError(result['message'])
-
-        chunks = result['data'].get('result_list', [])
-
-        search_result = []
-
-        for chunk in chunks:
-            raw_doc_info = chunk.get("doc_info")
-            doc_info = raw_doc_info if isinstance(raw_doc_info, dict) else {}
-            search_result.append(
-                SearchChunk(
-                    id=chunk["id"],
-                    content=chunk["content"],
-                    doc_id=doc_info.get("doc_id"),
-                    doc_name=doc_info.get("doc_name"),
-                )
+    search_result = []
+    for chunk in chunks:
+        raw_doc_info = chunk.get("doc_info")
+        doc_info = raw_doc_info if isinstance(raw_doc_info, dict) else {}
+        search_result.append(
+            SearchChunk(
+                id=chunk["id"],
+                content=chunk["content"],
+                doc_id=doc_info.get("doc_id"),
+                doc_name=doc_info.get("doc_name"),
             )
+        )
 
-        return SearchKnowledgeResult(result_list=search_result)
-    except ToolError:
-        raise
-    except Exception as e:
-        logger.error(f"Error in search_knowledge: {str(e)}")
-        raise ToolError(str(e)) from e
+    return SearchKnowledgeResult(result_list=search_result)
 
 
 def main():
