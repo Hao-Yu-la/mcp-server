@@ -365,7 +365,7 @@ Example stdio configuration using `uvx` and a Viking API key:
       "command": "uvx",
       "args": [
         "--from",
-        "mcp-server-knowledgebase>=0.2.0",
+        "mcp-server-knowledgebase>=0.2.1",
         "mcp-server-knowledgebase"
       ],
       "env": {
